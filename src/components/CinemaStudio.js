@@ -1,8 +1,9 @@
+import { t2iModels } from '../lib/models.js';
+import { readLocalHistory, isLocalOutputUrl } from '../lib/localStorage.js';
 
-import { muapi } from '../lib/muapi.js';
+import { localApi } from '../lib/localApi.js';
 import { CameraControls } from './CameraControls.js';
 import { buildNanoBananaPrompt, CAMERA_MAP, LENS_MAP, FOCAL_PERSPECTIVE, APERTURE_EFFECT } from '../lib/promptUtils.js';
-import { AuthModal } from './AuthModal.js';
 
 export function CinemaStudio() {
     const container = document.createElement('div');
@@ -433,7 +434,7 @@ export function CinemaStudio() {
 
     const addToHistory = (entry) => {
         generationHistory.unshift(entry);
-        localStorage.setItem('cinema_history', JSON.stringify(generationHistory.slice(0, 50)));
+        localStorage.setItem('open-higgsfield.local.v1.cinema-history', JSON.stringify(generationHistory.slice(0, 50)));
         renderHistory();
     };
 
@@ -496,7 +497,7 @@ export function CinemaStudio() {
 
     // Load saved history
     try {
-        const saved = JSON.parse(localStorage.getItem('cinema_history') || '[]');
+        const saved = readLocalHistory('open-higgsfield.local.v1.cinema-history');
         if (saved.length > 0) {
             saved.forEach(e => generationHistory.push(e));
             renderHistory();
@@ -515,7 +516,8 @@ export function CinemaStudio() {
 
     downloadBtn.onclick = async () => {
         try {
-            const response = await fetch(resultImg.src);
+            if (!isLocalOutputUrl(resultImg.src)) throw new Error('Only local backend outputs can be downloaded.');
+            const response = await fetch(resultImg.src, { credentials: 'omit', redirect: 'error' });
             const blob = await response.blob();
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -526,7 +528,7 @@ export function CinemaStudio() {
             document.body.removeChild(a);
             URL.revokeObjectURL(blobUrl);
         } catch (err) {
-            window.open(resultImg.src, '_blank');
+            if (isLocalOutputUrl(resultImg.src)) window.open(resultImg.src, '_blank', 'noopener,noreferrer');
         }
     };
 
@@ -536,12 +538,6 @@ export function CinemaStudio() {
     generateBtn.onclick = async () => {
         const basePrompt = textarea.value.trim();
         if (!basePrompt) return;
-
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) {
-            AuthModal(() => generateBtn.click());
-            return;
-        }
 
         generateBtn.disabled = true;
         generateBtn.innerHTML = "SHOOTING...";
@@ -556,8 +552,8 @@ export function CinemaStudio() {
         );
 
         try {
-            const res = await muapi.generateImage({
-                model: 'nano-banana-pro',
+            const res = await localApi.generateImage({
+                model: t2iModels[0].id,
                 prompt: finalPrompt,
                 aspect_ratio: currentSettings.aspect_ratio,
                 resolution: (resBtn.dataset.value || '1k').toLowerCase(),

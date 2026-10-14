@@ -1,5 +1,4 @@
-import { muapi } from '../lib/muapi.js';
-import { AuthModal } from './AuthModal.js';
+import { localApi } from '../lib/localApi.js';
 import { getUploadHistory, saveUpload, removeUpload, generateThumbnail } from '../lib/uploadHistory.js';
 
 /**
@@ -27,7 +26,10 @@ export function createUploadPicker({ anchorContainer, onSelect, onClear, maxImag
     // ── Trigger button ────────────────────────────────────────────────────────
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.title = 'Reference image';
+    trigger.disabled = true;
+    fileInput.disabled = true;
+    trigger.setAttribute('aria-label', 'Reference uploads are not available in the local backend yet.');
+    trigger.title = 'Uploads are not available in the local backend yet.';
     trigger.className = 'w-10 h-10 shrink-0 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden mt-1.5 bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40 group';
 
     // State: icon
@@ -318,12 +320,6 @@ export function createUploadPicker({ anchorContainer, onSelect, onClear, maxImag
         const files = Array.from(e.target.files);
         if (!files.length) return;
 
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) {
-            AuthModal(() => fileInput.click());
-            return;
-        }
-
         showSpinner();
 
         try {
@@ -331,7 +327,7 @@ export function createUploadPicker({ anchorContainer, onSelect, onClear, maxImag
                 // Single mode: upload first file only, replace selection
                 const file = files[0];
                 const [uploadedUrl, thumbnail] = await Promise.all([
-                    muapi.uploadFile(file),
+                    localApi.uploadFile(file),
                     generateThumbnail(file)
                 ]);
                 const entry = { id: Date.now().toString(), name: file.name, uploadedUrl, thumbnail, timestamp: new Date().toISOString() };
@@ -347,7 +343,7 @@ export function createUploadPicker({ anchorContainer, onSelect, onClear, maxImag
                 // Upload all in parallel
                 const results = await Promise.all(toUpload.map(async (file) => {
                     const [uploadedUrl, thumbnail] = await Promise.all([
-                        muapi.uploadFile(file),
+                        localApi.uploadFile(file),
                         generateThumbnail(file)
                     ]);
                     return { id: Date.now().toString() + Math.random(), name: file.name, uploadedUrl, thumbnail, timestamp: new Date().toISOString() };

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
@@ -14,7 +14,8 @@ function createWindow() {
         minWidth: 1024,
         minHeight: 640,
         webPreferences: {
-            webSecurity: false, // Allow file:// origin to call external APIs
+            webSecurity: true,
+            sandbox: true,
             contextIsolation: true,
             nodeIntegration: false,
         },
@@ -27,11 +28,8 @@ function createWindow() {
     const indexPath = path.join(__dirname, '../dist/index.html');
     mainWindow.loadFile(indexPath);
 
-    // Open external links in the system browser
-    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        shell.openExternal(url);
-        return { action: 'deny' };
-    });
+    mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    mainWindow.webContents.on('will-navigate', event => event.preventDefault());
 
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();

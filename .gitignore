@@ -12,6 +12,17 @@ dist
 dist-ssr
 *.local
 
+# Local development state and credentials
+.next/
+.cache/
+.env
+.env.*
+!.env.example
+**/.venv/
+**/__pycache__/
+*.pyc
+backend/data/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +33,50 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local credentials and private keys (template .env.example files stay tracked)
+*.env
+.envrc
+.git-credentials
+.netrc
+.aws/
+.ssh/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Additional isolated Python environments and tool caches
+**/.venv*/
+**/venv/
+**/env/
+**/site-packages/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+*.tsbuildinfo
+
+# Model/checkpoint binaries; keep model registry/configuration source files
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.h5
+*.hdf5
+*.tflite
+*.torchscript
+*.bin
+
+# Generated media, notebook checkpoints and packaged build outputs
+/outputs/
+/uploads/
+/generated/
+/release/
+/out/
+.ipynb_checkpoints/

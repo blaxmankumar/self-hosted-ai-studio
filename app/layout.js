@@ -1,8 +1,8 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'Open Higgsfield AI — Free AI Image & Video Studio',
-  description: 'Generate AI images and videos using 200+ models — Flux, Midjourney, Kling, Veo, Seedance and more. Free open-source alternative to Higgsfield AI.',
+  title: 'Open Higgsfield AI - Self-Hosted Studio',
+  description: 'Local AI image, video, cinema and lip-sync studio. Model availability is reported by your self-hosted backend.',
 };
 
 export default function RootLayout({ children }) {

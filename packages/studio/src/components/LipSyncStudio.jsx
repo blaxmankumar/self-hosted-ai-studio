@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { processLipSync, uploadFile } from '../muapi.js';
+import { processLipSync, uploadFile, isLocalOutputUrl } from '../api.js';
 import {
     lipsyncModels,
     imageLipSyncModels,
@@ -19,7 +19,7 @@ const UPLOAD_STATE = {
     READY: 'ready',
 };
 
-function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, progress, fileName, previewUrl, isVideo, apiKey }) {
+function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, progress, fileName, previewUrl, isVideo }) {
     const inputRef = useRef(null);
 
     const handleClick = (e) => {
@@ -46,17 +46,12 @@ function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState
     return (
         <button
             type="button"
-            title={
-                uploadState === UPLOAD_STATE.READY
-                    ? `${fileName} — click to clear`
-                    : `Upload ${label.toLowerCase()} file`
-            }
-            onClick={handleClick}
+            disabled title="Local media uploads are unavailable in Phase 3" onClick={handleClick}
             className={`flex-shrink-0 w-14 h-14 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden group ${borderClass}`}
         >
             <input
                 ref={inputRef}
-                type="file"
+                type="file" disabled title="Local uploads are unavailable in Phase 3"
                 accept={accept}
                 className="hidden"
                 onChange={handleChange}
@@ -149,6 +144,7 @@ function Dropdown({ isOpen, items, selectedId, onSelect, onClose, anchorRef }) {
             style={{ position: 'fixed', zIndex: 100, minWidth: 200, overflowY: 'auto', ...style }}
             className="bg-[#111] border border-white/10 rounded-2xl shadow-3xl p-2 custom-scrollbar"
         >
+            {items.length === 0 && <p className="px-4 py-3 text-xs text-white/50">No available local model.</p>}
             {items.map((item) => (
                 <button
                     key={item.id}
@@ -219,7 +215,7 @@ const VideoIcon = ({ className = 'text-muted group-hover:text-primary transition
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export default function LipSyncStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function LipSyncStudio({ onGenerationComplete, historyItems }) {
     // ── Mode & model state ──────────────────────────────────────────────────
     const [inputMode, setInputMode] = useState('image'); // 'image' | 'video'
 
@@ -261,7 +257,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
     // ── History ─────────────────────────────────────────────────────────────
     // If historyItems prop is provided, use it; otherwise use internal state.
     const [internalHistory, setInternalHistory] = useState([]);
-    const history = historyItems ?? internalHistory;
+    const history = (historyItems ?? internalHistory).filter(entry => isLocalOutputUrl(entry.url));
     const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
 
     // ── Dropdown state ──────────────────────────────────────────────────────
@@ -282,7 +278,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
     useEffect(() => {
         const models = inputMode === 'image' ? imageLipSyncModels : videoLipSyncModels;
         const first = models[0];
-        if (!first) return;
+        if (!first) { setSelectedModelId(''); return; }
         setSelectedModelId(first.id);
         setSelectedResolution(first.inputs?.resolution?.default ?? '480p');
     }, [inputMode]);
@@ -296,7 +292,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         setImageState(UPLOAD_STATE.UPLOADING);
         setImageProgress(0);
         try {
-            const url = await uploadFile(apiKey, file, (pct) => {
+            const url = await uploadFile(file, (pct) => {
                 setImageProgress(pct);
             });
             setImageUrl(url);
@@ -308,7 +304,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         } finally {
             setImageProgress(0);
         }
-    }, [apiKey]);
+    }, []);
 
     const handleVideoPick = useCallback(async (file) => {
         if (file.size > 50 * 1024 * 1024) {
@@ -318,7 +314,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         setVideoState(UPLOAD_STATE.UPLOADING);
         setVideoProgress(0);
         try {
-            const url = await uploadFile(apiKey, file, (pct) => {
+            const url = await uploadFile(file, (pct) => {
                 setVideoProgress(pct);
             });
             setVideoUrl(url);
@@ -330,7 +326,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         } finally {
             setVideoProgress(0);
         }
-    }, [apiKey]);
+    }, []);
 
     const handleAudioPick = useCallback(async (file) => {
         if (file.size > 10 * 1024 * 1024) {
@@ -340,7 +336,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         setAudioState(UPLOAD_STATE.UPLOADING);
         setAudioProgress(0);
         try {
-            const url = await uploadFile(apiKey, file, (pct) => {
+            const url = await uploadFile(file, (pct) => {
                 setAudioProgress(pct);
             });
             setAudioUrl(url);
@@ -352,7 +348,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
         } finally {
             setAudioProgress(0);
         }
-    }, [apiKey]);
+    }, []);
 
     // ── Mode toggle ─────────────────────────────────────────────────────────
     const switchToImage = () => {
@@ -387,7 +383,8 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
 
     const downloadFile = async (url, filename) => {
         try {
-            const response = await fetch(url);
+            if (!isLocalOutputUrl(url)) return;
+            const response = await fetch(url, { redirect: 'error', credentials: 'omit' });
             const blob = await response.blob();
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -404,6 +401,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
 
     // ── Generation ──────────────────────────────────────────────────────────
     const handleGenerate = async () => {
+        if (isGenerating || !selectedModel) return;
         if (!audioUrl) { alert('Please upload an audio file first.'); return; }
         if (inputMode === 'image' && !imageUrl) { alert('Please upload a portrait image first.'); return; }
         if (inputMode === 'video' && !videoUrl) { alert('Please upload a source video first.'); return; }
@@ -422,7 +420,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
             if (showResolution) lipsyncParams.resolution = selectedResolution;
             if (selectedModel?.hasSeed) lipsyncParams.seed = -1;
 
-            const res = await processLipSync(apiKey, lipsyncParams);
+            const res = await processLipSync(lipsyncParams);
 
             if (!res?.url) throw new Error('No video URL returned by API');
 
@@ -594,7 +592,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                         fileName={imageName}
                                         previewUrl={imageUrl}
                                         isVideo={false}
-                                        apiKey={apiKey}
+
                                     />
                                 )}
 
@@ -615,7 +613,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                         fileName={videoName}
                                         previewUrl={videoUrl}
                                         isVideo={true}
-                                        apiKey={apiKey}
+
                                     />
                                 )}
 
@@ -631,7 +629,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                     fileName={audioName}
                                     previewUrl={null}
                                     isVideo={false}
-                                    apiKey={apiKey}
+
                                 />
 
                                 {/* Prompt textarea */}
@@ -670,7 +668,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                             <polygon points="23 7 16 12 23 17 23 7" />
                                             <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
                                         </svg>
-                                        <span>{selectedModel?.name ?? 'Select model'}</span>
+                                        <span>{selectedModel?.name ?? 'No local lip-sync model'}</span>
                                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-muted group-hover:text-white transition-colors">
                                             <polyline points="6 9 12 15 18 9" />
                                         </svg>
@@ -722,7 +720,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                 <button
                                     type="button"
                                     onClick={handleGenerate}
-                                    disabled={isGenerating}
+                                    disabled={isGenerating || !selectedModel || !audioUrl || !(inputMode === "image" ? imageUrl : videoUrl)}
                                     className="ml-auto px-6 py-2.5 bg-primary text-black font-black text-sm rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-glow disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                                 >
                                     {isGenerating ? (
@@ -757,7 +755,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                         <button
                             type="button"
                             onClick={handleGenerate}
-                            disabled={isGenerating}
+                            disabled={isGenerating || !selectedModel || !audioUrl || !(inputMode === "image" ? imageUrl : videoUrl)}
                             className="bg-white/10 hover:bg-white/20 px-6 py-2.5 rounded-2xl text-xs font-bold transition-all border border-white/5 backdrop-blur-lg text-white disabled:opacity-50"
                         >
                             ↻ Regenerate

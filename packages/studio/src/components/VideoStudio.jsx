@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateVideo, generateI2V, uploadFile } from '../muapi.js';
+import { generateVideo, generateI2V, uploadFile, isLocalOutputUrl } from '../api.js';
 import {
     t2vModels,
     i2vModels,
@@ -23,8 +23,9 @@ function getQualitiesForModel(modelList, modelId) {
 }
 
 async function downloadFile(url, filename) {
+    if (!isLocalOutputUrl(url)) return;
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, { redirect: 'error', credentials: 'omit' });
         const blob = await response.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -177,19 +178,19 @@ function ControlBtn({ icon, label, onClick, style }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function VideoStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function VideoStudio({ onGenerationComplete, historyItems }) {
     // ── mode state ──
     const [imageMode, setImageMode] = useState(false);   // i2v
     const [v2vMode, setV2vMode] = useState(false);
 
     // ── model / params ──
     const defaultModel = t2vModels[0];
-    const [selectedModel, setSelectedModel] = useState(defaultModel.id);
-    const [selectedModelName, setSelectedModelName] = useState(defaultModel.name);
-    const [selectedAr, setSelectedAr] = useState(defaultModel.inputs?.aspect_ratio?.default || '16:9');
-    const [selectedDuration, setSelectedDuration] = useState(defaultModel.inputs?.duration?.default || 5);
-    const [selectedResolution, setSelectedResolution] = useState(defaultModel.inputs?.resolution?.default || '');
-    const [selectedQuality, setSelectedQuality] = useState(defaultModel.inputs?.quality?.default || '');
+    const [selectedModel, setSelectedModel] = useState((defaultModel?.id || ""));
+    const [selectedModelName, setSelectedModelName] = useState((defaultModel?.name || "No local video model"));
+    const [selectedAr, setSelectedAr] = useState(defaultModel?.inputs?.aspect_ratio?.default || '16:9');
+    const [selectedDuration, setSelectedDuration] = useState(defaultModel?.inputs?.duration?.default || 5);
+    const [selectedResolution, setSelectedResolution] = useState(defaultModel?.inputs?.resolution?.default || '');
+    const [selectedQuality, setSelectedQuality] = useState(defaultModel?.inputs?.quality?.default || '');
     const [selectedMode, setSelectedMode] = useState('');
 
     // ── upload progress ──
@@ -239,7 +240,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
     const resultVideoRef = useRef(null);
 
     // ── derived data ──
-    const history = historyItems ?? localHistory;
+    const history = (historyItems ?? localHistory).filter(entry => isLocalOutputUrl(entry.url));
 
     const getCurrentModels = useCallback(() => {
         if (v2vMode) return v2vModels;
@@ -297,7 +298,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
 
     // Initialise controls for default model on mount
     useEffect(() => {
-        applyControlsForModel(defaultModel.id, false, false);
+        applyControlsForModel((defaultModel?.id || ""), false, false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -334,7 +335,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         setImageProgress(0);
         
         try {
-            const url = await uploadFile(apiKey, file, (pct) => {
+            const url = await uploadFile(file, (pct) => {
                 setImageProgress(pct);
             });
             setUploadedImageUrl(url);
@@ -347,9 +348,9 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             if (!imageMode) {
                 const firstI2V = i2vModels[0];
                 setImageMode(true);
-                setSelectedModel(firstI2V.id);
-                setSelectedModelName(firstI2V.name);
-                applyControlsForModel(firstI2V.id, true, false);
+                setSelectedModel((firstI2V?.id || ""));
+                setSelectedModelName((firstI2V?.name || "No local video model"));
+                applyControlsForModel((firstI2V?.id || ""), true, false);
             }
             setPromptDisabled(false);
         } catch (err) {
@@ -366,9 +367,9 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         setUploadedImageUrl(null);
         setImageMode(false);
         const first = t2vModels[0];
-        setSelectedModel(first.id);
-        setSelectedModelName(first.name);
-        applyControlsForModel(first.id, false, false);
+        setSelectedModel((first?.id || ""));
+        setSelectedModelName((first?.name || "No local video model"));
+        applyControlsForModel((first?.id || ""), false, false);
         setPromptDisabled(false);
     };
 
@@ -383,7 +384,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         setVideoUploading(true);
         setVideoProgress(0);
         try {
-            const url = await uploadFile(apiKey, file, (pct) => {
+            const url = await uploadFile(file, (pct) => {
                 setVideoProgress(pct);
             });
             setUploadedVideoUrl(url);
@@ -396,9 +397,9 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             }
             setV2vMode(true);
             const firstV2V = v2vModels[0];
-            setSelectedModel(firstV2V.id);
-            setSelectedModelName(firstV2V.name);
-            applyControlsForModel(firstV2V.id, false, true);
+            setSelectedModel((firstV2V?.id || ""));
+            setSelectedModelName((firstV2V?.name || "No local video model"));
+            applyControlsForModel((firstV2V?.id || ""), false, true);
             setPrompt('');
             setPromptDisabled(true);
         } catch (err) {
@@ -416,9 +417,9 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         setUploadedVideoName(null);
         setV2vMode(false);
         const first = t2vModels[0];
-        setSelectedModel(first.id);
-        setSelectedModelName(first.name);
-        applyControlsForModel(first.id, false, false);
+        setSelectedModel((first?.id || ""));
+        setSelectedModelName((first?.name || "No local video model"));
+        applyControlsForModel((first?.id || ""), false, false);
         setPromptDisabled(false);
     };
 
@@ -464,6 +465,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
     const handleGenerate = useCallback(async () => {
         const currentModel = getCurrentModel();
         const isExtendMode = currentModel?.requiresRequestId;
+        if (generating || !currentModel) return;
         const trimmedPrompt = prompt.trim();
 
         if (v2vMode) {
@@ -486,7 +488,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
 
             if (v2vMode) {
                 // V2V: use generateVideo with video_url (the v2v models use the video endpoint)
-                res = await generateVideo(apiKey, {
+                res = await generateVideo({
                     model: selectedModel,
                     video_url: uploadedVideoUrl,
                 });
@@ -511,7 +513,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                 if (selectedQuality) i2vParams.quality = selectedQuality;
                 if (selectedMode) i2vParams.mode = selectedMode;
 
-                res = await generateI2V(apiKey, i2vParams);
+                res = await generateI2V(i2vParams);
                 if (!res?.url) throw new Error('No video URL returned by API');
 
                 const genId = res.id || Date.now().toString();
@@ -545,7 +547,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                 if (selectedQuality) params.quality = selectedQuality;
                 if (selectedMode) params.mode = selectedMode;
 
-                res = await generateVideo(apiKey, params);
+                res = await generateVideo(params);
                 if (!res?.url) throw new Error('No video URL returned by API');
 
                 const genId = res.id || Date.now().toString();
@@ -570,7 +572,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             setGenerating(false);
         }
     }, [
-        apiKey, prompt, v2vMode, imageMode, selectedModel, selectedAr, selectedDuration,
+        generating, prompt, v2vMode, imageMode, selectedModel, selectedAr, selectedDuration,
         selectedResolution, selectedQuality, selectedMode, uploadedImageUrl, uploadedVideoUrl,
         lastGenerationId, getCurrentModel, addToLocalHistory, showVideoInCanvas, onGenerationComplete,
     ]);
@@ -584,15 +586,14 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         resetToPromptBar();
         setPrompt('');
         setUploadedImageUrl(null);
-        setUploadedImagePreview(null);
         setImageMode(false);
         setUploadedVideoUrl(null);
         setUploadedVideoName(null);
         setV2vMode(false);
         const first = t2vModels[0];
-        setSelectedModel(first.id);
-        setSelectedModelName(first.name);
-        applyControlsForModel(first.id, false, false);
+        setSelectedModel((first?.id || ""));
+        setSelectedModelName((first?.name || "No local video model"));
+        applyControlsForModel((first?.id || ""), false, false);
         setPromptDisabled(false);
         setTimeout(() => textareaRef.current?.focus(), 50);
     }, [resetToPromptBar, applyControlsForModel]);
@@ -602,7 +603,6 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         resetToPromptBar();
         setPrompt('');
         setUploadedImageUrl(null);
-        setUploadedImagePreview(null);
         setImageMode(false);
         setSelectedModel('seedance-v2.0-extend');
         setSelectedModelName('Seedance 2.0 Extend');
@@ -694,7 +694,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                         <button
                             type="button"
                             onClick={handleGenerate}
-                            disabled={generating}
+                            disabled={generating || !getCurrentModel()}
                             className="bg-white/10 hover:bg-white/20 px-6 py-2.5 rounded-2xl text-xs font-bold transition-all border border-white/5 backdrop-blur-lg text-white"
                         >
                             ↻ Regenerate
@@ -753,7 +753,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                             Video Studio
                         </h1>
                         <p className="text-secondary text-sm font-medium tracking-wide opacity-60">
-                            Animate images into stunning AI videos with motion effects
+                            Video inference is unavailable until a compatible local worker is verified
                         </p>
                     </div>
 
@@ -768,14 +768,14 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                                 <div className="relative mt-1.5">
                                     <input
                                         ref={imageFileInputRef}
-                                        type="file"
+                                        type="file" disabled title="Local uploads are unavailable in Phase 3"
                                         accept="image/*"
                                         className="hidden"
                                         onChange={handleImageFileChange}
                                     />
                                     <button
                                         type="button"
-                                        title={uploadedImageUrl ? 'Clear image' : 'Upload image for Image-to-Video'}
+                                        disabled title="Local image uploads are unavailable in Phase 3"
                                         onClick={() => uploadedImageUrl ? clearImageUpload() : imageFileInputRef.current?.click()}
                                         className={`w-10 h-10 shrink-0 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden ${uploadedImageUrl ? 'border-primary/60 bg-primary/10' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40'} group`}
                                     >
@@ -802,14 +802,14 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                                 <div className="relative mt-1.5">
                                     <input
                                         ref={videoFileInputRef}
-                                        type="file"
+                                        type="file" disabled title="Local uploads are unavailable in Phase 3"
                                         accept="video/*"
                                         className="hidden"
                                         onChange={handleVideoFileChange}
                                     />
                                     <button
                                         type="button"
-                                        title={uploadedVideoUrl ? `${uploadedVideoName} — click to clear` : 'Upload video to remove watermark'}
+                                        disabled title="Local video uploads are unavailable in Phase 3"
                                         onClick={() => uploadedVideoUrl ? clearVideoUpload() : videoFileInputRef.current?.click()}
                                         className={`w-10 h-10 shrink-0 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden ${uploadedVideoUrl ? 'border-primary/60 bg-white/5' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40'} group`}
                                     >
@@ -997,7 +997,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                                 <button
                                     type="button"
                                     onClick={handleGenerate}
-                                    disabled={generating}
+                                    disabled={generating || !getCurrentModel()}
                                     className="bg-primary text-black px-6 md:px-8 py-3 md:py-3.5 rounded-xl md:rounded-[1.5rem] font-black text-sm md:text-base hover:shadow-glow hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2.5 w-full sm:w-auto shadow-lg disabled:opacity-60 disabled:scale-100"
                                 >
                                     {generating ? (

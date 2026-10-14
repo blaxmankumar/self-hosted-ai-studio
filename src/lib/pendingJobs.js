@@ -1,4 +1,4 @@
-const PENDING_KEY = 'muapi_pending_jobs';
+const PENDING_KEY = 'open-higgsfield.local.v1.pending-jobs';
 
 export function savePendingJob(job) {
     try {

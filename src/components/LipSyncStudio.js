@@ -1,6 +1,6 @@
-import { muapi } from '../lib/muapi.js';
+import { readLocalHistory, isLocalOutputUrl } from '../lib/localStorage.js';
+import { localApi } from '../lib/localApi.js';
 import { lipsyncModels, imageLipSyncModels, videoLipSyncModels, getLipSyncModelById, getResolutionsForLipSyncModel } from '../lib/models.js';
-import { AuthModal } from './AuthModal.js';
 import { createUploadPicker } from './UploadPicker.js';
 import { savePendingJob, removePendingJob, getPendingJobs } from '../lib/pendingJobs.js';
 
@@ -118,6 +118,9 @@ export function LipSyncStudio() {
 
     const videoPickerBtn = document.createElement('button');
     videoPickerBtn.type = 'button';
+    videoPickerBtn.disabled = true;
+    videoFileInput.disabled = true;
+    videoPickerBtn.setAttribute('aria-label', 'Uploads are not available in the local backend yet.');
     videoPickerBtn.title = 'Upload source video';
     videoPickerBtn.className = 'flex-shrink-0 w-14 h-14 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden hidden bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40 group';
 
@@ -168,11 +171,9 @@ export function LipSyncStudio() {
     videoFileInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) { AuthModal(() => videoFileInput.click()); return; }
         showVideoSpinner();
         try {
-            uploadedVideoUrl = await muapi.uploadFile(file);
+            uploadedVideoUrl = await localApi.uploadFile(file);
             showVideoReady(file.name);
         } catch (err) { showVideoIcon(); alert(`Video upload failed: ${err.message}`); }
         videoFileInput.value = '';
@@ -186,6 +187,9 @@ export function LipSyncStudio() {
 
     const audioPickerBtn = document.createElement('button');
     audioPickerBtn.type = 'button';
+    audioPickerBtn.disabled = true;
+    audioFileInput.disabled = true;
+    audioPickerBtn.setAttribute('aria-label', 'Uploads are not available in the local backend yet.');
     audioPickerBtn.title = 'Upload audio file';
     audioPickerBtn.className = 'flex-shrink-0 w-14 h-14 rounded-xl border transition-all flex items-center justify-center relative overflow-hidden bg-white/5 border-white/10 hover:bg-white/10 hover:border-primary/40 group';
 
@@ -236,11 +240,9 @@ export function LipSyncStudio() {
     audioFileInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) { AuthModal(() => audioFileInput.click()); return; }
         showAudioSpinner();
         try {
-            uploadedAudioUrl = await muapi.uploadFile(file);
+            uploadedAudioUrl = await localApi.uploadFile(file);
             showAudioReady(file.name);
         } catch (err) { showAudioIcon(); alert(`Audio upload failed: ${err.message}`); }
         audioFileInput.value = '';
@@ -529,7 +531,7 @@ export function LipSyncStudio() {
 
     const addToHistory = (entry) => {
         generationHistory.unshift(entry);
-        localStorage.setItem('lipsync_history', JSON.stringify(generationHistory.slice(0, 30)));
+        localStorage.setItem('open-higgsfield.local.v1.lipsync-history', JSON.stringify(generationHistory.slice(0, 30)));
         historySidebar.classList.remove('translate-x-full', 'opacity-0');
         historySidebar.classList.add('translate-x-0', 'opacity-100');
         renderHistory();
@@ -561,7 +563,8 @@ export function LipSyncStudio() {
 
     const downloadFile = async (url, filename) => {
         try {
-            const response = await fetch(url);
+            if (!isLocalOutputUrl(url)) throw new Error('Only local backend outputs can be downloaded.');
+            const response = await fetch(url, { credentials: 'omit', redirect: 'error' });
             const blob = await response.blob();
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -569,12 +572,12 @@ export function LipSyncStudio() {
             document.body.appendChild(a); a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(blobUrl);
-        } catch { window.open(url, '_blank'); }
+        } catch { if (isLocalOutputUrl(url)) window.open(url, '_blank', 'noopener,noreferrer'); }
     };
 
     // Load history
     try {
-        const saved = JSON.parse(localStorage.getItem('lipsync_history') || '[]');
+        const saved = readLocalHistory('open-higgsfield.local.v1.lipsync-history');
         if (saved.length > 0) {
             saved.forEach(e => generationHistory.push(e));
             historySidebar.classList.remove('translate-x-full', 'opacity-0');
@@ -587,8 +590,6 @@ export function LipSyncStudio() {
     (async () => {
         const pending = getPendingJobs('lipsync');
         if (!pending.length) return;
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) return;
         const banner = document.createElement('div');
         banner.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-[200] bg-[#111] border border-white/10 text-white text-sm px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3';
         banner.innerHTML = `<span class="animate-spin text-primary">◌</span> <span class="banner-text">Resuming ${pending.length} pending generation${pending.length > 1 ? 's' : ''}…</span>`;
@@ -598,7 +599,7 @@ export function LipSyncStudio() {
             const elapsedAttempts = Math.floor((Date.now() - job.submittedAt) / job.interval);
             const attemptsLeft = Math.max(1, job.maxAttempts - elapsedAttempts);
             try {
-                const result = await muapi.pollForResult(job.requestId, apiKey, attemptsLeft, job.interval);
+                const result = await localApi.pollForResult(job.requestId, { timeoutMs: attemptsLeft * job.interval, intervalMs: job.interval });
                 const url = result.outputs?.[0] || result.url || result.output?.url;
                 if (url) addToHistory({ id: job.requestId, url, ...job.historyMeta, timestamp: new Date().toISOString() });
             } catch (e) { console.warn('[LipSyncStudio] Pending job failed:', job.requestId, e.message); }
@@ -667,9 +668,6 @@ export function LipSyncStudio() {
             return;
         }
 
-        const apiKey = localStorage.getItem('muapi_key');
-        if (!apiKey) { AuthModal(() => generateBtn.click()); return; }
-
         hero.classList.add('opacity-0', 'scale-95', '-translate-y-10', 'pointer-events-none');
         generateBtn.disabled = true;
         generateBtn.innerHTML = `<span class="animate-spin inline-block mr-2 text-black">◌</span> Generating...`;
@@ -703,7 +701,7 @@ export function LipSyncStudio() {
 
             if (model?.hasSeed) lipsyncParams.seed = -1;
 
-            const res = await muapi.processLipSync(lipsyncParams);
+            const res = await localApi.processLipSync(lipsyncParams);
             console.log('[LipSyncStudio] Response:', res);
 
             if (res && res.url) {

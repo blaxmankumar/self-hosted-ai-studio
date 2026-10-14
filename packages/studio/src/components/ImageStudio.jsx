@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, generateI2I, uploadFile } from "../muapi.js";
+import { generateImage, generateI2I, uploadFile, getOutputBlob, isLocalOutputUrl } from "../api.js";
 import {
   t2iModels,
   i2iModels,
@@ -17,26 +17,27 @@ import {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 
-async function downloadImage(url, filename) {
+async function downloadImage(url, onError) {
+  let blobUrl;
   try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
+    const blob = await getOutputBlob(url);
+    blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
-    a.download = filename;
+    a.download = `studio-${url.split('/').slice(-2).join('-')}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(blobUrl);
-  } catch {
-    window.open(url, "_blank");
+  } catch (error) {
+    onError?.(error.message);
+  } finally {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
   }
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
 
-function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
+function UploadButton({ maxImages, onSelect, onClear }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState([]); // [{url, thumbnail}]
@@ -110,7 +111,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
           setUploadHistory((prev) => [placeholder, ...prev]);
 
           try {
-            const uploadedUrl = await uploadFile(apiKey, file, (pct) => {
+            const uploadedUrl = await uploadFile(file, (pct) => {
               setLastUploadProgress(pct);
               setUploadHistory((prev) =>
                 prev.map((h) => (h.id === id ? { ...h, progress: pct } : h))
@@ -291,7 +292,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
-        type="file"
+        type="file" disabled title="Reference image uploads are not yet supported"
         accept="image/*"
         multiple={isMulti}
         className="hidden"
@@ -302,7 +303,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
       <button
         ref={triggerRef}
         type="button"
-        title={triggerTitle}
+        disabled title="Reference image uploads are not yet supported"
         onClick={(e) => {
           e.stopPropagation();
           setPanelOpen((o) => !o);
@@ -515,6 +516,7 @@ function ModelDropdown({ models, selectedModel, onSelect, onClose }) {
         Available models
       </div>
       <div className="flex flex-col gap-1.5 overflow-y-auto custom-scrollbar pr-1 pb-2">
+        {filtered.length === 0 && <p className="px-3 py-4 text-xs text-white/50">No available image worker.</p>}
         {filtered.map((m) => (
           <div
             key={m.id}
@@ -591,16 +593,16 @@ function SimpleDropdown({ title, options, selected, onSelect, onClose }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ImageStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function ImageStudio({ onGenerationComplete, historyItems }) {
   // ── Model / mode state ──────────────────────────────────────────────────
   const [imageMode, setImageMode] = useState(false); // false=t2i, true=i2i
-  const [selectedModelId, setSelectedModelId] = useState(t2iModels[0].id);
-  const [selectedModelName, setSelectedModelName] = useState(t2iModels[0].name);
+  const [selectedModelId, setSelectedModelId] = useState((t2iModels[0]?.id || ""));
+  const [selectedModelName, setSelectedModelName] = useState((t2iModels[0]?.name || "No image worker available"));
   const [selectedAr, setSelectedAr] = useState(
-    t2iModels[0].inputs?.aspect_ratio?.default || "1:1"
+    t2iModels[0]?.inputs?.aspect_ratio?.default || "1:1"
   );
   const [selectedQuality, setSelectedQuality] = useState(() => {
-    const resolutions = getResolutionsForModel(t2iModels[0].id);
+    const resolutions = getResolutionsForModel((t2iModels[0]?.id || ""));
     return resolutions[0] || null;
   });
   const [maxImages, setMaxImages] = useState(1);
@@ -613,6 +615,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
   const [dropdownOpen, setDropdownOpen] = useState(null); // 'model' | 'ar' | 'quality' | null
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
+  const [generationJob, setGenerationJob] = useState(null);
 
   // ── Canvas / history state ──────────────────────────────────────────────
   const [currentImageUrl, setCurrentImageUrl] = useState(null);
@@ -620,7 +623,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
   const [localHistory, setLocalHistory] = useState([]); // [{id,url,prompt,model,aspect_ratio,timestamp}]
 
   // Use prop history if provided, otherwise local
-  const history = historyItems ?? localHistory;
+  const history = (historyItems ?? localHistory).filter(entry => isLocalOutputUrl(entry.url));
 
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
@@ -650,6 +653,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
 
   // ── Derived: current model lists & helpers ───────────────────────────────
   const currentModels = imageMode ? i2iModels : t2iModels;
+  const hasAvailableModel = currentModels.some(model => model.id === selectedModelId);
   const currentAspectRatios = imageMode
     ? getAspectRatiosForI2IModel(selectedModelId)
     : getAspectRatiosForModel(selectedModelId);
@@ -669,14 +673,14 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
 
       if (!imageMode) {
         const firstI2I = i2iModels[0];
-        const ars = getAspectRatiosForI2IModel(firstI2I.id);
-        const resolutions = getResolutionsForI2IModel(firstI2I.id);
+        const ars = getAspectRatiosForI2IModel((firstI2I?.id || ""));
+        const resolutions = getResolutionsForI2IModel((firstI2I?.id || ""));
         setImageMode(true);
-        setSelectedModelId(firstI2I.id);
-        setSelectedModelName(firstI2I.name);
+        setSelectedModelId((firstI2I?.id || ""));
+        setSelectedModelName((firstI2I?.name || "No image worker available"));
         setSelectedAr(ars[0] || "1:1");
         setSelectedQuality(resolutions[0] || null);
-        setMaxImages(getMaxImagesForI2IModel(firstI2I.id));
+        setMaxImages(getMaxImagesForI2IModel((firstI2I?.id || "")));
       }
     },
     [imageMode]
@@ -686,10 +690,10 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
     setUploadedImageUrls([]);
     setImageMode(false);
     const firstT2I = t2iModels[0];
-    const ars = getAspectRatiosForModel(firstT2I.id);
-    const resolutions = getResolutionsForModel(firstT2I.id);
-    setSelectedModelId(firstT2I.id);
-    setSelectedModelName(firstT2I.name);
+    const ars = getAspectRatiosForModel((firstT2I?.id || ""));
+    const resolutions = getResolutionsForModel((firstT2I?.id || ""));
+    setSelectedModelId((firstT2I?.id || ""));
+    setSelectedModelName((firstT2I?.name || "No image worker available"));
     setSelectedAr(ars[0] || "1:1");
     setSelectedQuality(resolutions[0] || null);
     setMaxImages(1);
@@ -731,10 +735,10 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
     setUploadedImageUrls([]);
     setImageMode(false);
     const firstT2I = t2iModels[0];
-    const ars = getAspectRatiosForModel(firstT2I.id);
-    const resolutions = getResolutionsForModel(firstT2I.id);
-    setSelectedModelId(firstT2I.id);
-    setSelectedModelName(firstT2I.name);
+    const ars = getAspectRatiosForModel((firstT2I?.id || ""));
+    const resolutions = getResolutionsForModel((firstT2I?.id || ""));
+    setSelectedModelId((firstT2I?.id || ""));
+    setSelectedModelName((firstT2I?.name || "No image worker available"));
     setSelectedAr(ars[0] || "1:1");
     setSelectedQuality(resolutions[0] || null);
     setMaxImages(1);
@@ -742,7 +746,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
 
   // ── Generation ───────────────────────────────────────────────────────────
   const handleGenerate = async () => {
-    if (generating) return;
+    if (generating || !hasAvailableModel) return;
 
     if (imageMode) {
       if (uploadedImageUrls.length === 0) {
@@ -758,6 +762,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
 
     setGenerating(true);
     setGenerateError(null);
+    setGenerationJob(null);
 
     try {
       let res;
@@ -767,22 +772,24 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
           images_list: uploadedImageUrls,
           image_url: uploadedImageUrls[0],
           aspect_ratio: selectedAr,
+          onStatus: setGenerationJob,
         };
         if (prompt.trim()) genParams.prompt = prompt.trim();
         if (currentQualityField && selectedQuality) {
           genParams[currentQualityField] = selectedQuality;
         }
-        res = await generateI2I(apiKey, genParams);
+        res = await generateI2I(genParams, { timeoutMs: 600000 });
       } else {
         const genParams = {
           model: selectedModelId,
           prompt: prompt.trim(),
           aspect_ratio: selectedAr,
+          onStatus: setGenerationJob,
         };
         if (currentQualityField && selectedQuality) {
           genParams[currentQualityField] = selectedQuality;
         }
-        res = await generateImage(apiKey, genParams);
+        res = await generateImage(genParams, { timeoutMs: 600000 });
       }
 
       if (res && res.url) {
@@ -795,19 +802,13 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
           timestamp: new Date().toISOString(),
         };
         addToHistory(entry);
-        onGenerationComplete?.({
-          url: res.url,
-          model: selectedModelId,
-          prompt: prompt.trim(),
-          type: "image",
-        });
+        onGenerationComplete?.({ ...entry, type: "image" });
       } else {
         throw new Error("No image URL returned by API");
       }
     } catch (e) {
       console.error("[ImageStudio] Generation failed:", e);
-      setGenerateError(e.message.slice(0, 80));
-      setTimeout(() => setGenerateError(null), 4000);
+      setGenerateError(e.message);
     } finally {
       setGenerating(false);
     }
@@ -819,10 +820,21 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
       : imageMode
       ? "Describe how to transform this image (optional)"
       : "Describe the image you want to create";
+  const progress = Number.isFinite(generationJob?.progress) && generationJob.progress >= 0 && generationJob.progress <= 100
+    ? generationJob.progress : null;
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative p-4 md:p-6 overflow-y-auto custom-scrollbar overflow-x-hidden">
+      {(generating || generateError) && <div className={`z-20 ${showCanvas
+        ? 'absolute top-4 left-4 right-28 max-w-xl rounded-xl bg-black/80 p-3'
+        : 'relative w-full max-w-xl mb-4'}`}>
+      {generating && <div className="text-sm text-white/70" role="status" aria-live="polite">
+        <span>{generationJob?.status === 'pending' ? 'Queued' : generationJob?.status === 'running' ? 'Generating image' : 'Submitting generation'}{progress !== null ? ` - ${Math.round(progress)}%` : '...'}</span>
+        <progress aria-label="Image generation progress" {...(progress === null ? {} : { value: progress })} max="100" className="block w-full h-2 mt-2 accent-[#d9ff00]" />
+      </div>}
+      {generateError && <p role="alert" className="text-sm text-amber-300">{generateError}</p>}
+      </div>}
 
       {/* ── CANVAS VIEW ─────────────────────────────────────────────────── */}
       {showCanvas && (
@@ -858,7 +870,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
                         title="Download"
                         onClick={(e) => {
                           e.stopPropagation();
-                          downloadImage(entry.url, `muapi-${entry.id || idx}.jpg`);
+                          downloadImage(entry.url, setGenerateError);
                         }}
                         className="p-1.5 bg-primary rounded-lg text-black hover:scale-110 transition-transform"
                       >
@@ -887,7 +899,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
             <button
               type="button"
               onClick={handleGenerate}
-              disabled={generating}
+              disabled={generating || !hasAvailableModel}
               className="bg-white/10 hover:bg-white/20 px-6 py-2.5 rounded-2xl text-xs font-bold transition-all border border-white/5 backdrop-blur-lg text-white disabled:opacity-50"
             >
               ↻ Regenerate
@@ -895,8 +907,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
             <button
               type="button"
               onClick={() => {
-                const entry = history[activeHistoryIdx];
-                downloadImage(currentImageUrl, `muapi-${entry?.id || "image"}.jpg`);
+                downloadImage(currentImageUrl, setGenerateError);
               }}
               className="bg-primary text-black px-6 py-2.5 rounded-2xl text-xs font-bold transition-all shadow-glow active:scale-95"
             >
@@ -965,7 +976,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
               {/* Top row: upload picker + textarea */}
               <div className="flex items-start gap-5 px-2">
                 <UploadButton
-                  apiKey={apiKey}
+
                   maxImages={maxImages}
                   onSelect={handleUploadSelect}
                   onClear={handleUploadClear}
@@ -1145,7 +1156,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
                 <button
                   type="button"
                   onClick={handleGenerate}
-                  disabled={generating}
+                  disabled={generating || !hasAvailableModel}
                   className="bg-primary text-black px-6 md:px-8 py-3 md:py-3.5 rounded-xl md:rounded-[1.5rem] font-black text-sm md:text-base hover:shadow-glow hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2.5 w-full sm:w-auto shadow-lg disabled:opacity-70 disabled:cursor-not-allowed disabled:scale-100"
                 >
                   {generating ? (
@@ -1153,8 +1164,6 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
                       <span className="animate-spin inline-block text-black">◌</span>
                       Generating...
                     </>
-                  ) : generateError ? (
-                    `Error: ${generateError}`
                   ) : (
                     "Generate ✨"
                   )}
@@ -1162,6 +1171,17 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
               </div>
             </div>
           </div>
+          {history.length > 0 && <div className="w-full max-w-3xl mt-6">
+            <p className="text-xs text-white/50 mb-3">Image history</p>
+            <div className="flex gap-3 overflow-x-auto pb-2">
+              {history.map((entry, idx) => <button type="button" key={entry.id || entry.url}
+                onClick={() => { setCurrentImageUrl(entry.url); setActiveHistoryIdx(idx); }}
+                title={entry.prompt || 'View generated image'} aria-label={`View generated image ${idx + 1}`}
+                className="shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-white/10 hover:border-primary">
+                <img src={entry.url} alt={entry.prompt || 'Generated image'} className="w-full h-full object-cover" />
+              </button>)}
+            </div>
+          </div>}
         </>
       )}
     </div>

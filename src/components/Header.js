@@ -26,7 +26,7 @@ export function Header(navigate) {
     `;
 
     const menu = document.createElement('nav');
-    menu.className = 'hidden lg:flex items-center gap-6 text-[13px] font-bold text-secondary';
+    menu.className = 'flex items-center gap-4 md:gap-6 text-[13px] font-bold text-secondary overflow-x-auto';
     const items = ['Image', 'Video', 'Lip Sync', 'Cinema Studio'];
 
     items.forEach(item => {
@@ -64,7 +64,8 @@ export function Header(navigate) {
 
     const keyBtn = document.createElement('button');
     keyBtn.className = 'p-2 text-secondary hover:text-white transition-colors';
-    keyBtn.title = 'Update API Key';
+    keyBtn.title = 'Local backend settings';
+    keyBtn.setAttribute('aria-label', 'Local backend settings');
     keyBtn.innerHTML = `
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3m-3-3l-2.25-2.25"/>

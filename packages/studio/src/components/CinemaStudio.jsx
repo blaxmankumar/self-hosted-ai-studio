@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateImage } from '../muapi.js';
+import { generateImage, isLocalOutputUrl } from '../api.js';
+import { t2iModels } from '../models.js';
 
 // ─── Constants (inlined from promptUtils) ───────────────────────────────────
 
@@ -73,7 +74,7 @@ const LENSES = Object.keys(LENS_MAP);
 const FOCAL_LENGTHS = Object.keys(FOCAL_PERSPECTIVE).map(k => parseInt(k));
 const APERTURES = Object.keys(APERTURE_EFFECT);
 
-function buildNanoBananaPrompt(basePrompt, camera, lens, focalLength, aperture) {
+function buildCinemaPrompt(basePrompt, camera, lens, focalLength, aperture) {
     const cameraDesc = CAMERA_MAP[camera] || camera;
     const lensDesc = LENS_MAP[lens] || lens;
     const perspective = FOCAL_PERSPECTIVE[focalLength] || "";
@@ -420,7 +421,7 @@ function CameraControlsOverlay({ isOpen, onClose, settings, onSettingsChange }) 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function CinemaStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function CinemaStudio({ onGenerationComplete, historyItems }) {
     // ── Settings state ──
     const [settings, setSettings] = useState({
         prompt: '',
@@ -451,7 +452,7 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
     const resultImgRef = useRef(null);
 
     // Derive effective history (prop wins over internal)
-    const history = historyItems != null ? historyItems : internalHistory;
+    const history = (historyItems != null ? historyItems : internalHistory).filter(entry => isLocalOutputUrl(entry.url));
 
     const formatSummaryValue = () =>
         `${settings.lens}, ${settings.focal}mm, ${settings.aperture}`;
@@ -467,11 +468,12 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
     // ── Generate ──
     const handleGenerate = useCallback(async () => {
         const basePrompt = settings.prompt.trim();
-        if (!basePrompt || isGenerating) return;
+        if (!basePrompt || isGenerating || !t2iModels.length) return;
+        const modelId = t2iModels[0].id;
 
         setIsGenerating(true);
 
-        const finalPrompt = buildNanoBananaPrompt(
+        const finalPrompt = buildCinemaPrompt(
             basePrompt,
             settings.camera,
             settings.lens,
@@ -480,8 +482,8 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
         );
 
         try {
-            const res = await generateImage(apiKey, {
-                model: 'nano-banana-pro',
+            const res = await generateImage({
+                model: modelId,
                 prompt: finalPrompt,
                 aspect_ratio: settings.aspect_ratio,
                 resolution: resolution.toLowerCase(),
@@ -514,9 +516,11 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
                 if (onGenerationComplete) {
                     onGenerationComplete({
                         url: res.url,
-                        model: 'nano-banana-pro',
+                        model: modelId,
                         prompt: basePrompt,
-                        type: 'cinema'
+                        type: 'cinema',
+                        settings: entry.settings,
+                        id: res.id,
                     });
                 }
             } else {
@@ -528,7 +532,7 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
         } finally {
             setIsGenerating(false);
         }
-    }, [settings, resolution, apiKey, isGenerating, onGenerationComplete, historyItems]);
+    }, [settings, resolution, isGenerating, onGenerationComplete, historyItems]);
 
     // ── Regenerate ──
     const handleRegenerate = useCallback(() => {
@@ -539,9 +543,9 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
 
     // ── Download ──
     const handleDownload = useCallback(async () => {
-        if (!canvasUrl) return;
+        if (!isLocalOutputUrl(canvasUrl)) return;
         try {
-            const response = await fetch(canvasUrl);
+            const response = await fetch(canvasUrl, { redirect: 'error', credentials: 'omit' });
             const blob = await response.blob();
             const blobUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -601,7 +605,7 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
                 className={`flex flex-col items-center justify-center text-center px-4 animate-fade-in-up transition-all duration-700 ${showCanvas ? 'opacity-0 pointer-events-none scale-95' : 'opacity-100 scale-100'}`}
             >
                 <div className="mb-4 text-xs font-bold text-white/40 tracking-[0.2em] uppercase">
-                    Cinema Studio 2.0
+                    Cinema Studio ? Local inference
                 </div>
                 <h1 className="text-4xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50 tracking-tight leading-tight mb-2">
                     What would you shoot<br />with infinite budget?
@@ -628,7 +632,7 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
                     className={`mt-8 flex gap-3 justify-center transition-opacity duration-500 delay-500 ${showCanvas ? 'opacity-100' : 'opacity-0'}`}
                 >
                     <button
-                        onClick={() => handleRegenerate()}
+                        disabled={isGenerating || !t2iModels.length} onClick={() => handleRegenerate()}
                         className="bg-white/10 hover:bg-white/20 px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wide transition-all border border-white/5 backdrop-blur-lg text-white hover:border-white/20"
                     >
                         ↻ Regenerate
@@ -736,10 +740,10 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
                         {/* Generate Button */}
                         <button
                             className="h-[56px] px-8 bg-[#d9ff00] text-black rounded-xl font-black text-xs uppercase hover:bg-white transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={isGenerating || !settings.prompt.trim()}
+                            disabled={isGenerating || !settings.prompt.trim() || !t2iModels.length}
                             onClick={handleGenerate}
                         >
-                            {isGenerating ? 'SHOOTING...' : 'GENERATE ✨'}
+                            {isGenerating ? 'SHOOTING...' : !t2iModels.length ? 'MODEL UNAVAILABLE' : 'GENERATE'}
                         </button>
                     </div>
                 </div>

@@ -1,4 +1,29 @@
-# Open Higgsfield AI — Open-Source Alternative to Higgsfield AI
+# Open Higgsfield AI — Self-Hosted Local Foundation
+
+The existing Studio uses a local frontend/backend with an optional,
+provider-independent HTTP GPU worker adapter. **No model or worker endpoint is
+configured by default.** Generation becomes available only when a genuine
+worker reports readiness. The original studios are preserved, with model
+choices driven by backend availability. Worker credentials stay on the backend.
+
+Start with [Windows local setup and tests](docs/LOCAL_DEVELOPMENT.md),
+[repository inspection](docs/REPOSITORY_ANALYSIS.md) and
+[backend API/worker notes](backend/README.md). See the
+[GPU worker integration and Kaggle assessment](docs/GPU_WORKER_INTEGRATION.md)
+for the exact next step to produce a real image inside Image Studio.
+
+```powershell
+# Terminal 1, from C:\Users\MSI\Open-Higgsfield-AI
+& .\backend\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
+# Terminal 2
+npm.cmd run dev
+```
+
+Open `http://127.0.0.1:3000/studio`. First-time installation commands are in
+the setup guide. No cloud resources, drivers or model weights are changed.
+
+<details>
+<summary>Historical upstream README (hosted-provider instructions do not apply to this branch)</summary>
 
 > **The free, open-source alternative to Higgsfield AI.** Generate AI images and videos using 200+ state-of-the-art models — without the closed ecosystem or subscription fees.
 
@@ -345,3 +370,5 @@ Built with [Muapi.ai](https://muapi.ai) — the unified API for AI image and vid
 
 ---
 *Looking for a free Higgsfield AI alternative? Open Higgsfield AI is an open-source AI image and video generation studio and Higgsfield AI replacement that you can self-host, customize, and extend.*
+
+</details>
